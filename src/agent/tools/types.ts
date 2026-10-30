@@ -5,7 +5,7 @@ import type { ProjectNotes } from '../../memory/notes';
 import type { CommandRunner } from './commandTool';
 
 export interface ApprovalRequest {
-  kind: 'edit' | 'create' | 'command';
+  kind: 'edit' | 'create' | 'command' | 'tool';
   title: string;
   detail: string;
 }

@@ -10,8 +10,8 @@ import { ChatMessage, ToolsUnsupportedError } from '../providers/types';
 import { estimateTokens, fitToBudget, messagesTokens } from './context';
 import { PromptParts, buildSystemPrompt } from './prompt';
 import { CommandRunner } from './tools/commandTool';
-import { ALL_TOOLS, TOOLS_BY_NAME } from './tools';
-import { ApprovalRequest } from './tools/types';
+import { ALL_TOOLS } from './tools';
+import { ApprovalRequest, Tool } from './tools/types';
 
 const MAX_TOOL_RESULT = 12_000;
 const RESPONSE_RESERVE = 2048;
@@ -34,6 +34,8 @@ export interface AgentDeps {
   notes: ProjectNotes;
   indexer: CodeIndexer;
   commands: CommandRunner;
+  /** Extra tools from connected MCP servers. */
+  mcp: { tools(): Promise<Tool[]> };
 }
 
 /** The parts of a chat session the agent reads and updates. */
@@ -62,9 +64,10 @@ export class Agent {
     const contextSize = await this.contextSize(model);
     session.history.push({ role: 'user', content: userContent });
 
-    const [memory, relevantCode] = await Promise.all([
+    const [memory, relevantCode, mcpTools] = await Promise.all([
       this.deps.notes.forPrompt(signal).catch(() => ''),
       this.relevantCode(userContent),
+      this.deps.mcp.tools(),
     ]);
     const parts: PromptParts = {
       workspaceNames: (vscode.workspace.workspaceFolders ?? []).map((f) => f.name),
@@ -74,7 +77,9 @@ export class Agent {
       mode: opts.mode,
       todos: session.todos,
     };
-    const tools = opts.mode === 'plan' ? ALL_TOOLS.filter((t) => t.readOnly) : ALL_TOOLS;
+    const allTools = [...ALL_TOOLS, ...mcpTools];
+    const toolsByName = new Map(allTools.map((t) => [t.spec.name, t]));
+    const tools = opts.mode === 'plan' ? allTools.filter((t) => t.readOnly) : allTools;
     const toolNames = new Set(tools.map((t) => t.spec.name));
     const toolSpecs = tools.map((t) => t.spec);
 
@@ -125,7 +130,7 @@ export class Agent {
       if (!toolCalls.length) return;
 
       for (const call of toolCalls) {
-        const tool = toolNames.has(call.name) ? TOOLS_BY_NAME.get(call.name) : undefined;
+        const tool = toolNames.has(call.name) ? toolsByName.get(call.name) : undefined;
         let output: string;
         let ok = true;
         if (signal.aborted) {
@@ -134,7 +139,7 @@ export class Agent {
         } else if (!tool) {
           ok = false;
           output =
-            opts.mode === 'plan' && TOOLS_BY_NAME.has(call.name)
+            opts.mode === 'plan' && toolsByName.has(call.name)
               ? `${call.name} is not available in plan mode. Finish the plan; the user will switch modes to carry it out.`
               : `Unknown tool "${call.name}". Available tools: ${[...toolNames].join(', ')}.`;
           events.onToolStart(call.id, call.name, '');

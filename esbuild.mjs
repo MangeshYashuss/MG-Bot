@@ -1,4 +1,9 @@
 import * as esbuild from 'esbuild';
+import * as fs from 'fs';
+
+// Codicons (VS Code's icon font) ship inside dist/ because node_modules is excluded from the .vsix.
+fs.mkdirSync('dist', { recursive: true });
+for (const f of ['codicon.css', 'codicon.ttf']) fs.copyFileSync(`node_modules/@vscode/codicons/dist/${f}`, `dist/${f}`);
 
 const production = process.argv.includes('--production');
 const watch = process.argv.includes('--watch');

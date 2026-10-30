@@ -56,6 +56,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { name: 'memory', description: 'Open the project memory file' },
   { name: 'history', description: 'Show previous chats for this project' },
   { name: 'model', description: 'Switch the chat model' },
+  { name: 'mcp', description: 'Show connected MCP servers and their tools' },
   { name: 'help', description: 'Show commands and shortcuts' },
 ];
 

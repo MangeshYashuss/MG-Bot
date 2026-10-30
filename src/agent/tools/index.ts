@@ -17,5 +17,3 @@ export const ALL_TOOLS: Tool[] = [
   recallTool,
   todoWriteTool,
 ];
-
-export const TOOLS_BY_NAME = new Map(ALL_TOOLS.map((t) => [t.spec.name, t]));

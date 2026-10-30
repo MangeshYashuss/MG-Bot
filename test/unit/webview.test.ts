@@ -9,7 +9,7 @@ import { chatHtml } from '../../src/webview/markup';
 const bundle = path.resolve(__dirname, '../../../dist/webview.js');
 
 function load() {
-  const html = chatHtml({ nonce: 'n', cspSource: '', scriptUri: '', styleUri: '', commands: SLASH_COMMANDS }).replace(/<script[^>]*src=[^>]*><\/script>/, '');
+  const html = chatHtml({ nonce: 'n', cspSource: '', scriptUri: '', styleUri: '', codiconUri: '', commands: SLASH_COMMANDS }).replace(/<script[^>]*src=[^>]*><\/script>/, '');
   const dom = new JSDOM(html, { runScripts: 'dangerously' });
   const sent: any[] = [];
   const w = dom.window as any;
@@ -42,7 +42,7 @@ describe('chat webview', () => {
     assert.match($('#modeBtn').textContent!, /Ask before edits/);
   });
 
-  it('streams a conversation with thinking, tools, approvals, todos and usage', () => {
+  it('streams a conversation with thinking, tools, approvals, todos and usage', async () => {
     const { post, $, doc, sent } = load();
     post(state);
     post({ type: 'user', text: 'fix @src/a.ts please', tIndex: 0 });
@@ -52,6 +52,7 @@ describe('chat webview', () => {
     post({ type: 'assistantStart' });
     post({ type: 'thinking', text: 'Let me think' });
     post({ type: 'token', text: 'Here is ```ts\nconst x = 1;\n```' });
+    await new Promise((r) => setTimeout(r, 80)); // streaming renders are throttled
     assert.strictEqual(($('details.thinking') as HTMLDetailsElement).open, true);
     post({ type: 'assistantEnd', text: 'Here is\n```ts\nconst x = 1;\n```', thinking: 'Let me think' });
     assert.strictEqual(($('details.thinking') as HTMLDetailsElement).open, false);

@@ -30,16 +30,18 @@ const historyEl = $('history');
 const historyList = $<HTMLUListElement>('historyList');
 const historySearch = $<HTMLInputElement>('historySearch');
 
-const MODES: Record<Mode, { label: string; hint: string }> = {
-  ask: { label: '✋ Ask before edits', hint: 'MG Bot shows a diff and waits for your approval before changing files.' },
-  auto: { label: '⚡ Edit automatically', hint: 'File changes are applied without review. Commands still ask.' },
-  plan: { label: '🗺 Plan mode', hint: 'Read-only: MG Bot investigates and proposes a plan without changing anything.' },
+const MODES: Record<Mode, { icon: string; label: string; hint: string }> = {
+  ask: { icon: 'shield', label: 'Ask before edits', hint: 'MG Bot shows a diff and waits for your approval before changing files.' },
+  auto: { icon: 'zap', label: 'Edit automatically', hint: 'File changes are applied without review. Commands still ask.' },
+  plan: { icon: 'map', label: 'Plan mode', hint: 'Read-only: MG Bot investigates and proposes a plan without changing anything.' },
 };
 const MODE_ORDER: Mode[] = ['ask', 'auto', 'plan'];
+// Codicon names: https://microsoft.github.io/vscode-codicons/dist/codicon.html
 const TOOL_ICONS: Record<string, string> = {
-  read_file: '📄', list_dir: '📁', search_code: '🔎', semantic_search: '🧭', edit_file: '✏️',
-  create_file: '🆕', run_command: '▶️', remember: '🧠', recall: '🧠', todo_write: '☑️',
+  read_file: 'file', list_dir: 'folder', search_code: 'search', semantic_search: 'compass', edit_file: 'edit',
+  create_file: 'new-file', run_command: 'terminal', remember: 'lightbulb', recall: 'lightbulb', todo_write: 'checklist',
 };
+const TYPING = '<span class="typing"><i></i><i></i><i></i></span>';
 
 const ui = {
   mode: 'ask' as Mode,
@@ -58,7 +60,7 @@ const ui = {
 let current: { el: HTMLElement; body: HTMLElement; thinkingEl?: HTMLDetailsElement; raw: string; thinking: string } | undefined;
 const tools = new Map<string, HTMLDetailsElement>();
 const approvals = new Map<string, HTMLElement>();
-const codeBlocks: string[] = [];
+let renderTimer = 0;
 
 // ---- Helpers ---------------------------------------------------------------------------------
 
@@ -69,10 +71,17 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
   return node;
 }
 
-function button(label: string, title: string, onClick: () => void, cls = 'link-btn'): HTMLButtonElement {
-  const b = el('button', cls, label);
+function icon(name: string): HTMLElement {
+  return el('i', `codicon codicon-${name}`);
+}
+
+function button(label: string, title: string, onClick: () => void, cls = 'link-btn', iconName?: string): HTMLButtonElement {
+  const b = el('button', cls);
+  if (iconName) b.append(icon(iconName));
+  if (label) b.append(label);
   b.type = 'button';
   b.title = title;
+  b.setAttribute('aria-label', title);
   b.addEventListener('click', (e) => {
     e.stopPropagation();
     onClick();
@@ -99,12 +108,11 @@ function renderMarkdown(src: string): string {
   src = src.replace(/```(?:tool|tool_call)\s*\n[\s\S]*?(```|$)/g, '');
   const blocks: string[] = [];
   src = src.replace(/```([\w+#.-]*)[^\n]*\n([\s\S]*?)(```|$)/g, (_m, lang: string, code: string) => {
-    const id = codeBlocks.push(code.replace(/\n$/, '')) - 1;
     blocks.push(
       `<div class="code"><div class="code-bar"><span class="lang">${escapeHtml(lang || 'text')}</span>` +
-        `<button type="button" class="link-btn" data-copy-code="${id}" title="Copy code">Copy</button>` +
-        `<button type="button" class="link-btn" data-insert-code="${id}" title="Insert at cursor in the editor">Insert</button></div>` +
-        `<pre><code>${escapeHtml(codeBlocks[id])}</code></pre></div>`,
+        `<button type="button" class="icon-btn" data-copy-code title="Copy code" aria-label="Copy code"><i class="codicon codicon-copy"></i></button>` +
+        `<button type="button" class="icon-btn" data-insert-code title="Insert at cursor in the editor" aria-label="Insert at cursor"><i class="codicon codicon-insert"></i></button></div>` +
+        `<pre><code>${escapeHtml(code.replace(/\n$/, ''))}</code></pre></div>`,
     );
     return `\u0000${blocks.length - 1}\u0000`;
   });
@@ -175,9 +183,9 @@ function addUser(text: string, tIndex: number): void {
   }
   const actions = el('div', 'msg-actions');
   actions.append(
-    button('Edit', 'Edit this message (removes it and everything after it from the chat)', () => vscode.postMessage({ type: 'editFrom', index: tIndex })),
-    button('Retry', 'Send this message again (removes the replies after it)', () => vscode.postMessage({ type: 'retryFrom', index: tIndex })),
-    button('Copy', 'Copy message', () => vscode.postMessage({ type: 'copy', text })),
+    button('', 'Edit this message (removes it and everything after it from the chat)', () => vscode.postMessage({ type: 'editFrom', index: tIndex }), 'icon-btn', 'edit'),
+    button('', 'Send this message again (removes the replies after it)', () => vscode.postMessage({ type: 'retryFrom', index: tIndex }), 'icon-btn', 'refresh'),
+    button('', 'Copy message', () => vscode.postMessage({ type: 'copy', text }), 'icon-btn', 'copy'),
   );
   wrap.append(bubble, actions);
   log.appendChild(wrap);
@@ -189,7 +197,7 @@ function startAssistant(): void {
   if (current) return;
   const wrap = el('div', 'msg assistant');
   const body = el('div', 'body');
-  body.innerHTML = '<span class="typing"><i></i><i></i><i></i></span>';
+  body.innerHTML = TYPING;
   wrap.append(body);
   log.appendChild(wrap);
   current = { el: wrap, body, raw: '', thinking: '' };
@@ -208,16 +216,22 @@ function showThinking(text: string, streaming: boolean): void {
   current.thinkingEl.querySelector('.thinking-body')!.textContent = text.trim();
 }
 
+/** Re-renders the streaming reply at most every 50 ms; re-parsing on every token is quadratic on long replies. */
 function updateStreaming(): void {
-  if (!current) return;
-  const { content, thinking } = splitThinking(current.raw);
-  showThinking([current.thinking, thinking].filter(Boolean).join('\n\n'), true);
-  const html = renderMarkdown(content);
-  current.body.innerHTML = html || '<span class="typing"><i></i><i></i><i></i></span>';
-  scroll();
+  if (renderTimer) return;
+  renderTimer = window.setTimeout(() => {
+    renderTimer = 0;
+    if (!current) return;
+    const { content, thinking } = splitThinking(current.raw);
+    showThinking([current.thinking, thinking].filter(Boolean).join('\n\n'), true);
+    current.body.innerHTML = renderMarkdown(content) || TYPING;
+    scroll();
+  }, 50);
 }
 
 function endAssistant(text: string, thinking: string): void {
+  clearTimeout(renderTimer);
+  renderTimer = 0;
   if (!current) startAssistant();
   const c = current!;
   const split = splitThinking(text || c.raw);
@@ -226,7 +240,7 @@ function endAssistant(text: string, thinking: string): void {
   if (split.content.trim()) {
     c.body.innerHTML = renderMarkdown(split.content);
     const actions = el('div', 'msg-actions');
-    actions.append(button('Copy', 'Copy response', () => vscode.postMessage({ type: 'copy', text: split.content })));
+    actions.append(button('', 'Copy response', () => vscode.postMessage({ type: 'copy', text: split.content }), 'icon-btn', 'copy'));
     c.el.append(actions);
   } else if (allThinking) {
     c.body.remove();
@@ -244,7 +258,7 @@ function addTool(id: string, name: string, label: string): void {
   }
   const card = el('details', 'tool running');
   const summary = el('summary');
-  summary.append(el('span', 'icon', TOOL_ICONS[name] ?? '🔧'), el('span', 'name', name), el('span', 'label', label));
+  summary.append(icon(TOOL_ICONS[name] ?? (name.includes('__') ? 'plug' : 'tools')), el('span', 'name', name), el('span', 'label', label), icon('loading codicon-modifier-spin state'));
   card.append(summary, el('pre', 'result', 'Running…'));
   log.appendChild(card);
   tools.set(id, card);
@@ -256,18 +270,20 @@ function endTool(id: string, ok: boolean, result: string): void {
   if (!card) return;
   card.classList.remove('running');
   card.classList.add(ok ? 'ok' : 'failed');
+  card.querySelector('.state')!.className = `codicon codicon-${ok ? 'pass' : 'error'} state`;
   card.querySelector('.result')!.textContent = result;
 }
 
 function addApproval(id: string, kind: string, title: string, detail: string): void {
   const card = el('div', `approval ${kind}`);
   card.append(el('div', 'title', title));
-  if (kind !== 'command') card.append(el('div', 'hint', 'Review the diff in the editor.'));
+  if (kind === 'edit' || kind === 'create') card.append(el('div', 'hint', 'Review the diff in the editor.'));
   card.append(el('pre', 'detail', detail));
   const row = el('div', 'buttons');
+  const [label, iconName] = kind === 'command' ? ['Run', 'play'] : kind === 'tool' ? ['Allow', 'plug'] : ['Apply', 'check'];
   row.append(
-    button(kind === 'command' ? 'Run' : 'Apply', 'Approve', () => vscode.postMessage({ type: 'approve', id, approved: true }), ''),
-    button('Reject', 'Reject', () => vscode.postMessage({ type: 'approve', id, approved: false }), 'secondary'),
+    button(label, 'Approve', () => vscode.postMessage({ type: 'approve', id, approved: true }), '', iconName),
+    button('Reject', 'Reject', () => vscode.postMessage({ type: 'approve', id, approved: false }), 'secondary', 'close'),
   );
   card.append(row);
   log.appendChild(card);
@@ -279,7 +295,9 @@ function endApproval(id: string, approved: boolean): void {
   const card = approvals.get(id);
   if (!card) return;
   card.classList.add('done');
-  card.querySelector('.buttons')?.replaceWith(el('div', approved ? 'verdict ok' : 'verdict failed', approved ? 'Approved' : 'Rejected'));
+  const verdict = el('div', approved ? 'verdict ok' : 'verdict failed');
+  verdict.append(icon(approved ? 'pass' : 'circle-slash'), approved ? 'Approved' : 'Rejected');
+  card.querySelector('.buttons')?.replaceWith(verdict);
 }
 
 function addNotice(text: string, level: string): void {
@@ -296,10 +314,10 @@ function renderTodos(todos: Todo[]): void {
   details.open = done < todos.length;
   details.append(el('summary', '', `Tasks ${done}/${todos.length}`));
   const list = el('ul');
-  const icon = { pending: '○', in_progress: '◐', completed: '●' };
+  const icons = { pending: 'circle-large-outline', in_progress: 'sync codicon-modifier-spin', completed: 'pass-filled' };
   for (const t of todos) {
     const li = el('li', t.status);
-    li.append(el('span', 'todo-icon', icon[t.status]), el('span', '', t.content));
+    li.append(icon(`${icons[t.status]} todo-icon`), el('span', '', t.content));
     list.append(li);
   }
   details.append(list);
@@ -324,7 +342,7 @@ function showPlanActions(): void {
   if (ui.mode !== 'plan' || !last?.classList.contains('assistant')) return;
   const row = el('div', 'plan-actions');
   row.append(
-    button('Execute plan', 'Switch to "Ask before edits" and carry out this plan', () => vscode.postMessage({ type: 'executePlan' }), ''),
+    button('Execute plan', 'Switch to "Ask before edits" and carry out this plan', () => vscode.postMessage({ type: 'executePlan' }), '', 'play'),
     button('Keep planning', 'Refine the plan', () => input.focus(), 'secondary'),
   );
   log.appendChild(row);
@@ -337,7 +355,7 @@ function removePlanActions(): void {
 
 function showWelcome(healthy: boolean, hasModel: boolean): void {
   const w = el('div', 'welcome');
-  w.append(el('h2', '', 'MG Bot'), el('p', '', 'A coding agent that runs on your machine and remembers your project.'));
+  w.append(icon('hubot hero'), el('h2', '', 'MG Bot'), el('p', '', 'A coding agent that runs on your machine and remembers your project.'));
   const steps = el('ol');
   steps.append(
     el('li', healthy ? 'done' : '', 'Start a local runtime (Ollama, LM Studio or llama.cpp).'),
@@ -347,8 +365,8 @@ function showWelcome(healthy: boolean, hasModel: boolean): void {
   w.append(steps);
   const tips = el('div', 'welcome-actions');
   tips.append(
-    button('/init — learn this project', 'Study the project and save it to memory', () => vscode.postMessage({ type: 'send', text: '/init' }), 'secondary'),
-    button('Chat history', 'Previous chats in this project', () => openHistory(), 'secondary'),
+    button('/init — learn this project', 'Study the project and save it to memory', () => vscode.postMessage({ type: 'send', text: '/init' }), 'secondary', 'sparkle'),
+    button('Chat history', 'Previous chats in this project', () => openHistory(), 'secondary', 'history'),
   );
   w.append(tips);
   log.appendChild(w);
@@ -362,7 +380,8 @@ function resetLog(): void {
   log.innerHTML = '';
   tools.clear();
   approvals.clear();
-  codeBlocks.length = 0;
+  clearTimeout(renderTimer);
+  renderTimer = 0;
   current = undefined;
 }
 
@@ -375,9 +394,10 @@ function setState(s: any): void {
   ui.mode = s.mode;
   ui.includeEditor = s.includeEditor;
   ui.chatId = s.chatId;
+  if (s.commands) window.MGBOT_COMMANDS = s.commands;
   titleEl.textContent = s.title;
   titleEl.title = `${s.title} — double-click to rename`;
-  modeBtn.textContent = MODES[ui.mode].label;
+  modeBtn.replaceChildren(icon(MODES[ui.mode].icon), MODES[ui.mode].label);
   modeBtn.title = `${MODES[ui.mode].hint} (Shift+Tab to switch)`;
   modeBtn.className = `mode ${ui.mode}`;
   statusEl.className = `status ${s.healthy ? 'up' : 'down'}`;
@@ -410,8 +430,9 @@ function setBusy(busy: boolean): void {
   const wasBusy = ui.busy;
   ui.busy = busy;
   stopBtn.hidden = !busy;
-  sendBtn.textContent = busy ? 'Queue' : 'Send';
+  sendBtn.replaceChildren(icon(busy ? 'layers' : 'send'));
   sendBtn.title = busy ? 'Queue this message to send when MG Bot finishes' : 'Send (Enter)';
+  statusEl.classList.toggle('busy', busy);
   if (wasBusy && !busy) {
     if (ui.queue.length) {
       const next = ui.queue.shift()!;
@@ -428,7 +449,7 @@ function renderEditorChip(): void {
   editorChip.hidden = !e;
   if (!e) return;
   const name = e.path.split('/').pop();
-  editorChip.textContent = `${ui.includeEditor ? '👁' : '⊘'} ${name}${e.selection ? `:${e.selection.start}-${e.selection.end}` : ''}`;
+  editorChip.replaceChildren(icon(ui.includeEditor ? 'eye' : 'eye-closed'), `${name}${e.selection ? `:${e.selection.start}-${e.selection.end}` : ''}`);
   editorChip.title = `${e.path}${e.selection ? ` (lines ${e.selection.start}-${e.selection.end} selected)` : ''}\n${
     ui.includeEditor ? 'Included as context — click to exclude' : 'Not included — click to include'
   }`;
@@ -441,10 +462,10 @@ function renderQueue(): void {
   ui.queue.forEach((text, i) => {
     const chip = el('div', 'queued');
     chip.append(el('span', '', `Queued: ${text.length > 60 ? text.slice(0, 57) + '…' : text}`));
-    chip.append(button('✕', 'Remove from queue', () => {
+    chip.append(button('', 'Remove from queue', () => {
       ui.queue.splice(i, 1);
       renderQueue();
-    }));
+    }, 'icon-btn', 'close'));
     queueEl.append(chip);
   });
 }
@@ -477,25 +498,19 @@ function renderHistory(): void {
     const main = el('div', 'chat-main');
     main.append(el('div', 'chat-name', c.title), el('div', 'chat-meta', `${c.when} · ${c.messageCount} message${c.messageCount === 1 ? '' : 's'}${c.model ? ` · ${c.model}` : ''}`));
     const actions = el('div', 'chat-actions');
-    actions.append(
-      button('✎', 'Rename', () => startRename(main, c.id, c.title)),
-      button('🗑', 'Delete', function (this: void) {
-        const b = actions.querySelector<HTMLButtonElement>('[data-del]')!;
-        if (b.dataset.armed) {
-          vscode.postMessage({ type: 'deleteChat', id: c.id });
-        } else {
-          b.dataset.armed = '1';
-          b.textContent = 'Delete?';
-          b.classList.add('danger');
-          setTimeout(() => {
-            delete b.dataset.armed;
-            b.textContent = '🗑';
-            b.classList.remove('danger');
-          }, 3000);
-        }
-      }),
-    );
-    actions.lastElementChild!.setAttribute('data-del', '');
+    // Delete needs a second click within 3 s.
+    const del: HTMLButtonElement = button('', 'Delete', () => {
+      if (del.dataset.armed) return vscode.postMessage({ type: 'deleteChat', id: c.id });
+      del.dataset.armed = '1';
+      del.replaceChildren('Delete?');
+      del.classList.add('danger');
+      setTimeout(() => {
+        delete del.dataset.armed;
+        del.replaceChildren(icon('trash'));
+        del.classList.remove('danger');
+      }, 3000);
+    }, 'icon-btn', 'trash');
+    actions.append(button('', 'Rename', () => startRename(main, c.id, c.title), 'icon-btn', 'edit'), del);
     li.append(main, actions);
     const open = () => {
       vscode.postMessage({ type: 'openChat', id: c.id });
@@ -542,7 +557,7 @@ const suggest = {
 function updateSuggestions(): void {
   const caret = input.selectionStart ?? input.value.length;
   const before = input.value.slice(0, caret);
-  const slash = /^\/(\w*)$/.exec(before);
+  const slash = /^\/([\w-]*)$/.exec(before);
   if (slash) {
     const q = slash[1].toLowerCase();
     suggest.kind = 'slash';
@@ -738,14 +753,14 @@ input.addEventListener('keydown', (e) => {
 
 log.addEventListener('click', (e) => {
   const target = e.target as HTMLElement;
-  const copy = target.closest<HTMLElement>('[data-copy-code]');
-  const insert = target.closest<HTMLElement>('[data-insert-code]');
-  if (copy) {
-    vscode.postMessage({ type: 'copy', text: codeBlocks[Number(copy.dataset.copyCode)] });
-    copy.textContent = 'Copied';
-    setTimeout(() => (copy.textContent = 'Copy'), 1200);
-  } else if (insert) {
-    vscode.postMessage({ type: 'insertCode', code: codeBlocks[Number(insert.dataset.insertCode)] });
+  const btn = target.closest<HTMLElement>('[data-copy-code], [data-insert-code]');
+  const code = btn?.closest('.code')?.querySelector('pre code')?.textContent ?? '';
+  if (btn?.hasAttribute('data-copy-code')) {
+    vscode.postMessage({ type: 'copy', text: code });
+    btn.replaceChildren(icon('check'));
+    setTimeout(() => btn.replaceChildren(icon('copy')), 1200);
+  } else if (btn) {
+    vscode.postMessage({ type: 'insertCode', code });
   }
 });
 

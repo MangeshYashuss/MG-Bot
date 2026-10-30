@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import type { McpServerConfig } from './mcp/tools';
 import { createProvider, ModelProvider } from './providers';
 
 export interface MgBotConfig {
@@ -14,6 +15,7 @@ export interface MgBotConfig {
   indexEnabled: boolean;
   indexExclude: string[];
   indexMaxFileSizeKB: number;
+  mcpServers: Record<string, McpServerConfig>;
 }
 
 export function getConfig(): MgBotConfig {
@@ -31,6 +33,7 @@ export function getConfig(): MgBotConfig {
     indexEnabled: c.get('index.enabled', true),
     indexExclude: c.get('index.exclude', []),
     indexMaxFileSizeKB: c.get('index.maxFileSizeKB', 256),
+    mcpServers: c.get('mcpServers', {}),
   };
 }
 

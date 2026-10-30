@@ -45,13 +45,53 @@ You can also right-click a selection and choose **MG Bot: Explain Selection** or
 | **Modes** | Click the mode button or press **Shift+Tab** to cycle. *Ask before edits* shows a diff for approval. *Edit automatically* applies file changes without review (commands still ask). *Plan mode* is read-only: the agent investigates and writes a plan, then **Execute plan** carries it out. |
 | **Attach files** | Type `@` and pick a file or folder. Its contents are sent with your message. |
 | **Editor context** | The chip above the input shows the active file and selection, which are included as context. Click the chip to exclude them. |
-| **Slash commands** | `/new`, `/clear`, `/compact` (summarize to free context), `/init` (study the project and save it to memory), `/memory`, `/history`, `/model`, `/help` |
+| **Slash commands** | `/new`, `/clear`, `/compact` (summarize to free context), `/init` (study the project and save it to memory), `/memory`, `/history`, `/model`, `/mcp`, `/help`, plus your own skills (below) |
 | **Context meter** | The percentage in the header shows how full the model's context window is. Use `/compact` when it gets high. |
 | **Thinking** | Reasoning from thinking models (Qwen3, DeepSeek-R1, gpt-oss…) appears in a collapsible *Thought process* block. |
 | **Task list** | For multi-step work the agent keeps a live checklist above the input. |
 | **Message actions** | Hover a message to copy it. On your own messages, **Edit** or **Retry** replays from that point; file changes already made are kept. Code blocks have **Copy** and **Insert** (at the editor cursor) buttons. |
 | **Queue** | Send messages while the agent is working; they run in order when it finishes. |
 | **Keyboard** | Enter sends · Shift+Enter adds a new line · ↑/↓ recalls earlier messages · Esc stops the agent |
+
+### Skills (custom slash commands)
+
+A skill is a markdown file whose contents are sent to the agent when you type `/<file name>`. Run **MG Bot: New Skill** or create the file yourself:
+
+- `.mgbot/skills/<name>.md` in the project (commit it to share it with your team)
+- `~/.mgbot/skills/<name>.md` for every project
+
+```markdown
+---
+description: Review the current changes
+---
+Run `git diff`, review it for bugs and missing tests, and list problems by severity.
+Focus on: $ARGUMENTS
+```
+
+`$ARGUMENTS` is replaced by the text typed after the command. Without the placeholder, that text is added at the end. Skills appear in the `/` menu as soon as you save the file. Built-in commands keep their names, and a project skill wins over a global skill with the same name.
+
+### MCP servers
+
+MG Bot can use tools from [Model Context Protocol](https://modelcontextprotocol.io) servers. Add them to `mgbot.mcpServers` (**MG Bot: Configure MCP Servers**), using the same format as other MCP clients:
+
+```json
+"mgbot.mcpServers": {
+  "fetch": { "command": "uvx", "args": ["mcp-server-fetch"] },
+  "github": {
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-github"],
+    "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "…" },
+    "autoApprove": ["search_repositories"]
+  },
+  "docs": { "url": "http://localhost:3000/mcp" }
+}
+```
+
+- Servers start the first time the agent runs, not when VS Code starts. They restart when you change the setting.
+- Every MCP tool call asks for approval, unless the server marks the tool read-only or you list it in `autoApprove` (`true` approves all of that server's tools).
+- In plan mode, only read-only MCP tools are offered.
+- Type `/mcp` to see which servers are connected and which tools they provide.
+- Small local models get less reliable as more tools are added. Connect only the servers you need.
 
 ### Choosing a model
 
@@ -79,6 +119,7 @@ Larger models follow instructions and use tools much more reliably. Very small m
 | `mgbot.index.enabled` | `true` | Turn the code index on or off |
 | `mgbot.index.exclude` | `[]` | Extra gitignore-style patterns to skip |
 | `mgbot.index.maxFileSizeKB` | `256` | Skip larger files when indexing |
+| `mgbot.mcpServers` | `{}` | MCP servers whose tools the agent can use (see above) |
 
 ## Privacy and safety
 
@@ -86,6 +127,7 @@ Larger models follow instructions and use tools much more reliably. Very small m
 - Ollama "cloud" models (shown with a cloud icon) run on remote servers. Use a local model to keep code on your machine.
 - File access is limited to the open workspace folders. Writes to `.git/` and the index are blocked.
 - Every edit and command needs your approval unless you change the settings above.
+- MCP servers run as local processes with your permissions. Only add servers you trust. In a folder you haven't trusted (VS Code Workspace Trust), `mgbot.mcpServers` and `mgbot.commandAllowList` from that folder's settings are ignored.
 - The agent is told never to store secrets in project memory. Review `.mgbot/memory.md` before committing it.
 
 ## Development

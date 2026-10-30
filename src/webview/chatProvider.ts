@@ -1,10 +1,14 @@
 import * as crypto from 'crypto';
+import * as os from 'os';
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { Agent } from '../agent/loop';
 import { ApprovalRequest } from '../agent/tools/types';
+import { Skill, expandSkill, loadSkills } from '../chat/skills';
 import { AgentMode, ChatSession, ChatStore, titleFrom } from '../chat/store';
 import { INIT_PROMPT, SLASH_COMMANDS, extractMentions, rankPaths } from '../chat/text';
 import { getConfig, workspaceRoots } from '../config';
+import { McpManager } from '../mcp/manager';
 import { ModelManager } from '../models/manager';
 import { resolveInWorkspace } from '../util/paths';
 import { chatHtml } from './markup';
@@ -49,6 +53,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
   private saveTimer?: NodeJS.Timeout;
   private editorTimer?: NodeJS.Timeout;
   private fileList?: { at: number; paths: string[] };
+  private skills: Skill[] = [];
   private readonly disposables: vscode.Disposable[] = [];
 
   constructor(
@@ -57,13 +62,34 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
     private readonly store: ChatStore,
     private readonly agent: Agent,
     private readonly models: ModelManager,
+    private readonly mcp: McpManager,
   ) {
     this.session = store.create(getConfig().chatModel);
     this.disposables.push(
       models.onDidChangeModels.event(() => this.postState()),
       vscode.window.onDidChangeActiveTextEditor(() => this.scheduleEditorUpdate()),
       vscode.window.onDidChangeTextEditorSelection(() => this.scheduleEditorUpdate()),
+      vscode.workspace.onDidChangeWorkspaceFolders(() => this.reloadSkills()),
     );
+    for (const pattern of ['**/.mgbot/skills/*.md', new vscode.RelativePattern(vscode.Uri.file(globalSkillsDir()), '*.md')]) {
+      const watcher = vscode.workspace.createFileSystemWatcher(pattern);
+      watcher.onDidCreate(() => this.reloadSkills());
+      watcher.onDidChange(() => this.reloadSkills());
+      watcher.onDidDelete(() => this.reloadSkills());
+      this.disposables.push(watcher);
+    }
+    void this.reloadSkills();
+  }
+
+  /** Skills from the project's .mgbot/skills, then from ~/.mgbot/skills. */
+  private async reloadSkills(): Promise<void> {
+    const dirs = [...workspaceRoots().map((r) => path.join(r.fsPath, '.mgbot', 'skills')), globalSkillsDir()];
+    this.skills = await loadSkills(dirs, SLASH_COMMANDS.map((c) => c.name)).catch(() => []);
+    this.postState();
+  }
+
+  private get commands() {
+    return [...SLASH_COMMANDS, ...this.skills.map(({ name, description }) => ({ name, description }))];
   }
 
   /** Reopens the chat that was active when VS Code was last closed. */
@@ -94,10 +120,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
 
   // ---- Sending -------------------------------------------------------------------------------
 
-  async send(text: string): Promise<void> {
+  /** Sends a message. `prompt` replaces what the model sees (used by skills), `text` is what the chat shows. */
+  async send(text: string, prompt?: string): Promise<void> {
     text = text.trim();
     if (!text) return;
-    if (text.startsWith('/')) return this.slashCommand(text);
+    if (text.startsWith('/') && prompt === undefined) return this.slashCommand(text);
     if (this.abort) {
       this.notice('MG Bot is still working. Stop it first or wait for it to finish.', 'info');
       return;
@@ -106,7 +133,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
 
     const session = this.session;
     if (!session.history.length) session.title = titleFrom(text);
-    const content = await this.expandMentions(text);
+    const content = await this.expandMentions(prompt ?? text);
     this.record({ type: 'user', text, histIndex: session.history.length });
     this.post({ type: 'busy', value: true });
     this.postState();
@@ -166,6 +193,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
 
   private async slashCommand(text: string): Promise<void> {
     const [name, ...rest] = text.slice(1).split(/\s+/);
+    const skill = this.skills.find((s) => s.name === name.toLowerCase());
+    if (skill) return this.send(text, expandSkill(skill, text.slice(1 + name.length).trim()));
     switch (name.toLowerCase()) {
       case 'new':
       case 'clear':
@@ -182,10 +211,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
         return this.postChatList();
       case 'model':
         return this.pickModel();
+      case 'mcp':
+        return this.notice(await this.mcp.status(), 'info');
       case 'help':
         return this.notice(
           [
-            'Commands: ' + SLASH_COMMANDS.map((c) => `/${c.name} — ${c.description}`).join(' · '),
+            'Commands: ' + this.commands.map((c) => `/${c.name} — ${c.description}`).join(' · '),
+            'Add your own commands as markdown files in .mgbot/skills/ (project) or ~/.mgbot/skills/ (everywhere) — run "MG Bot: New Skill".',
             'Shortcuts: Enter sends · Shift+Enter new line · Shift+Tab switches mode · ↑ recalls earlier messages · @ attaches a file · Esc stops',
           ].join('\n'),
           'info',
@@ -480,6 +512,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       chatId: this.session.id,
       title: this.session.title,
       busy: this.busy,
+      commands: this.commands,
     });
   }
 
@@ -534,8 +567,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider, vscode.Disp
     const nonce = crypto.randomBytes(16).toString('base64');
     const script = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview.js'));
     const style = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'chat.css'));
-    return chatHtml({ nonce, cspSource: webview.cspSource, scriptUri: script.toString(), styleUri: style.toString(), commands: SLASH_COMMANDS });
+    const codicons = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'dist', 'codicon.css'));
+    return chatHtml({ nonce, cspSource: webview.cspSource, scriptUri: script.toString(), styleUri: style.toString(), codiconUri: codicons.toString(), commands: this.commands });
   }
+}
+
+export function globalSkillsDir(): string {
+  return path.join(os.homedir(), '.mgbot', 'skills');
 }
 
 function friendlyError(e: Error): string {
