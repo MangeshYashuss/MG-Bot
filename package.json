@@ -1,0 +1,324 @@
+{
+  "name": "mg-bot",
+  "displayName": "MG Bot — Local AI Coding Agent",
+  "description": "Download and run open-weight models locally (Ollama, LM Studio, llama.cpp) and let them read, edit and run your codebase — with a persistent project memory and code index.",
+  "version": "0.2.0",
+  "publisher": "mgbot",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "AI",
+    "Chat",
+    "Programming Languages",
+    "Machine Learning"
+  ],
+  "keywords": [
+    "ollama",
+    "local llm",
+    "lm studio",
+    "llama.cpp",
+    "offline",
+    "agent",
+    "rag"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "mgbot",
+          "title": "MG Bot",
+          "icon": "media/mgbot.svg"
+        }
+      ]
+    },
+    "views": {
+      "mgbot": [
+        {
+          "type": "webview",
+          "id": "mgbot.chat",
+          "name": "Chat"
+        },
+        {
+          "id": "mgbot.models",
+          "name": "Models"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "mgbot.openChat",
+        "title": "Open Chat",
+        "category": "MG Bot"
+      },
+      {
+        "command": "mgbot.newChat",
+        "title": "New Chat",
+        "category": "MG Bot",
+        "icon": "$(add)"
+      },
+      {
+        "command": "mgbot.showHistory",
+        "title": "Show Chat History",
+        "category": "MG Bot",
+        "icon": "$(history)"
+      },
+      {
+        "command": "mgbot.selectRuntime",
+        "title": "Select Model Runtime",
+        "category": "MG Bot",
+        "icon": "$(server-environment)"
+      },
+      {
+        "command": "mgbot.refreshModels",
+        "title": "Refresh Models",
+        "category": "MG Bot",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "mgbot.pullModel",
+        "title": "Download Model by Name…",
+        "category": "MG Bot",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "mgbot.downloadModel",
+        "title": "Download",
+        "category": "MG Bot",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "mgbot.deleteModel",
+        "title": "Delete Model",
+        "category": "MG Bot",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "mgbot.setChatModel",
+        "title": "Use as Chat Model",
+        "category": "MG Bot",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "mgbot.setEmbeddingModel",
+        "title": "Use as Embedding Model",
+        "category": "MG Bot",
+        "icon": "$(database)"
+      },
+      {
+        "command": "mgbot.rebuildIndex",
+        "title": "Rebuild Code Index",
+        "category": "MG Bot"
+      },
+      {
+        "command": "mgbot.openMemory",
+        "title": "Open Project Memory",
+        "category": "MG Bot"
+      },
+      {
+        "command": "mgbot.explainSelection",
+        "title": "Explain Selection",
+        "category": "MG Bot"
+      },
+      {
+        "command": "mgbot.refactorSelection",
+        "title": "Refactor Selection",
+        "category": "MG Bot"
+      },
+      {
+        "command": "mgbot.installHelp",
+        "title": "How to Install Ollama",
+        "category": "MG Bot"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "mgbot.newChat",
+          "when": "view == mgbot.chat",
+          "group": "navigation@1"
+        },
+        {
+          "command": "mgbot.showHistory",
+          "when": "view == mgbot.chat",
+          "group": "navigation@2"
+        },
+        {
+          "command": "mgbot.selectRuntime",
+          "when": "view == mgbot.models",
+          "group": "navigation@1"
+        },
+        {
+          "command": "mgbot.pullModel",
+          "when": "view == mgbot.models",
+          "group": "navigation@2"
+        },
+        {
+          "command": "mgbot.refreshModels",
+          "when": "view == mgbot.models",
+          "group": "navigation@3"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "mgbot.downloadModel",
+          "when": "view == mgbot.models && viewItem == catalogModel",
+          "group": "inline"
+        },
+        {
+          "command": "mgbot.setChatModel",
+          "when": "view == mgbot.models && viewItem =~ /^installedModel/",
+          "group": "inline@1"
+        },
+        {
+          "command": "mgbot.setEmbeddingModel",
+          "when": "view == mgbot.models && viewItem =~ /^installedModel/",
+          "group": "inline@2"
+        },
+        {
+          "command": "mgbot.deleteModel",
+          "when": "view == mgbot.models && viewItem == installedModel.deletable",
+          "group": "inline@3"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "mgbot.explainSelection",
+          "when": "editorHasSelection",
+          "group": "mgbot@1"
+        },
+        {
+          "command": "mgbot.refactorSelection",
+          "when": "editorHasSelection",
+          "group": "mgbot@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "mgbot.downloadModel",
+          "when": "false"
+        },
+        {
+          "command": "mgbot.deleteModel",
+          "when": "false"
+        },
+        {
+          "command": "mgbot.setChatModel",
+          "when": "false"
+        },
+        {
+          "command": "mgbot.setEmbeddingModel",
+          "when": "false"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "MG Bot",
+      "properties": {
+        "mgbot.provider": {
+          "type": "string",
+          "enum": [
+            "ollama",
+            "openai-compatible"
+          ],
+          "enumDescriptions": [
+            "Ollama (can download and delete models from inside VS Code)",
+            "Any OpenAI-compatible local server: LM Studio, llama.cpp llama-server, vLLM, LocalAI…"
+          ],
+          "default": "ollama",
+          "description": "Which local model runtime to use."
+        },
+        "mgbot.endpoint": {
+          "type": "string",
+          "default": "",
+          "description": "Runtime URL. Leave empty for the default (Ollama: http://localhost:11434, OpenAI-compatible: http://localhost:1234/v1)."
+        },
+        "mgbot.chatModel": {
+          "type": "string",
+          "default": "",
+          "description": "Model used for chat and agent work."
+        },
+        "mgbot.embeddingModel": {
+          "type": "string",
+          "default": "",
+          "description": "Model used to embed the codebase for semantic search (e.g. nomic-embed-text). Leave empty to disable the code index."
+        },
+        "mgbot.contextSize": {
+          "type": "number",
+          "default": 16384,
+          "minimum": 2048,
+          "description": "Context window (tokens) requested from the model. Capped at the model's maximum when the runtime reports it."
+        },
+        "mgbot.maxSteps": {
+          "type": "number",
+          "default": 25,
+          "minimum": 1,
+          "description": "Maximum tool-use steps the agent may take for one request."
+        },
+        "mgbot.autoApproveEdits": {
+          "type": "boolean",
+          "default": false,
+          "description": "Start in \"Edit automatically\" mode (file changes skip the diff review). Switch modes in the chat with Shift+Tab. Commands always ask unless allow-listed."
+        },
+        "mgbot.commandAllowList": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Command prefixes that run without asking, e.g. \"npm test\", \"git status\"."
+        },
+        "mgbot.commandTimeoutSeconds": {
+          "type": "number",
+          "default": 120,
+          "description": "Kill commands started by the agent after this many seconds."
+        },
+        "mgbot.index.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Keep a local semantic index of the workspace (stored in .mgbot/index)."
+        },
+        "mgbot.index.exclude": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Extra gitignore-style patterns to keep out of the index."
+        },
+        "mgbot.index.maxFileSizeKB": {
+          "type": "number",
+          "default": 256,
+          "description": "Skip files larger than this when indexing."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit -p .",
+    "pretest": "node esbuild.mjs && tsc -p tsconfig.test.json",
+    "test": "mocha \"out/test/unit/**/*.test.js\"",
+    "vscode:prepublish": "node esbuild.mjs --production",
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "ignore": "^5.3.2"
+  },
+  "devDependencies": {
+    "@types/jsdom": "^21.1.7",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^20.17.0",
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.2.0",
+    "esbuild": "^0.24.0",
+    "jsdom": "^24.1.3",
+    "mocha": "^10.8.0",
+    "typescript": "^5.6.0"
+  }
+}

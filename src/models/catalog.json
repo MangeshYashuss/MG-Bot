@@ -1,0 +1,13 @@
+[
+  { "name": "qwen2.5-coder:1.5b", "kind": "chat", "size": "1.0 GB", "ram": "4 GB", "note": "Very fast, for low-end laptops. Basic agent ability." },
+  { "name": "qwen2.5-coder:7b", "kind": "chat", "size": "4.7 GB", "ram": "8 GB", "note": "Recommended starting point. Good tool calling." },
+  { "name": "qwen2.5-coder:14b", "kind": "chat", "size": "9.0 GB", "ram": "16 GB", "note": "Stronger reasoning and edits." },
+  { "name": "qwen2.5-coder:32b", "kind": "chat", "size": "20 GB", "ram": "32 GB / 24 GB VRAM", "note": "Best open coder in this list; needs a big GPU." },
+  { "name": "qwen3-coder:30b", "kind": "chat", "size": "19 GB", "ram": "32 GB", "note": "Mixture-of-experts, fast for its size. Strong agentic coding." },
+  { "name": "devstral:24b", "kind": "chat", "size": "14 GB", "ram": "24 GB", "note": "Tuned for multi-file agent work." },
+  { "name": "gpt-oss:20b", "kind": "chat", "size": "14 GB", "ram": "16 GB", "note": "General reasoning model with tool calling." },
+  { "name": "llama3.1:8b", "kind": "chat", "size": "4.9 GB", "ram": "8 GB", "note": "General-purpose model with tool calling." },
+  { "name": "deepseek-coder-v2:16b", "kind": "chat", "size": "8.9 GB", "ram": "16 GB", "note": "Strong code generation. Uses text-based tool calls." },
+  { "name": "nomic-embed-text", "kind": "embedding", "size": "274 MB", "ram": "1 GB", "note": "Recommended embedding model for the code index." },
+  { "name": "mxbai-embed-large", "kind": "embedding", "size": "670 MB", "ram": "2 GB", "note": "Higher-quality embeddings, slower to index." }
+]
